@@ -1,5 +1,6 @@
 """Multi-Agent Research Assistant with a live workflow control room."""
 import os
+import re
 import tempfile
 import time
 from datetime import datetime
@@ -141,6 +142,142 @@ html, body, [class*="css"] {
     transition: width 0.35s ease;
 }
 
+.graph-board {
+    position: relative;
+    border: 1px solid var(--edge);
+    border-radius: 14px;
+    background: linear-gradient(180deg, #f7fbff 0%, #f2f7ff 100%);
+    min-height: 420px;
+    overflow: hidden;
+    margin-bottom: 12px;
+}
+
+.graph-title {
+    position: absolute;
+    top: 10px;
+    left: 14px;
+    color: var(--ink);
+    font-size: 1.05rem;
+    font-weight: 800;
+}
+
+.g-node {
+    position: absolute;
+    border: 2px solid #c9d8ee;
+    border-radius: 12px;
+    background: #ffffff;
+    color: var(--ink);
+    box-shadow: 0 4px 14px rgba(16, 32, 54, 0.08);
+    padding: 10px;
+}
+
+.g-node.large {
+    width: 270px;
+    min-height: 96px;
+}
+
+.g-node.small {
+    width: 150px;
+    min-height: 80px;
+}
+
+.g-node.router {
+    width: 140px;
+    min-height: 90px;
+}
+
+.g-node-title {
+    font-size: 0.95rem;
+    font-weight: 800;
+    line-height: 1.2;
+}
+
+.g-node-sub {
+    font-size: 0.8rem;
+    color: var(--muted);
+    margin-top: 4px;
+}
+
+.g-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    display: inline-block;
+    margin-right: 6px;
+    background: #9ca3af;
+}
+
+.state-idle { border-color: #cbd5e1; background: #f8fafc; }
+.state-idle .g-dot { background: #94a3b8; }
+
+.state-running {
+    border-color: #2563eb;
+    background: #eff6ff;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14), 0 4px 14px rgba(16, 32, 54, 0.1);
+}
+.state-running .g-dot { background: #2563eb; }
+
+.state-completed { border-color: #16a34a; background: #f0fdf4; }
+.state-completed .g-dot { background: #16a34a; }
+
+.state-failed { border-color: #dc2626; background: #fef2f2; }
+.state-failed .g-dot { background: #dc2626; }
+
+.tool-node {
+    position: absolute;
+    width: 112px;
+    min-height: 86px;
+    border: 2px solid #c7d2fe;
+    border-radius: 999px;
+    background: #ffffff;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    box-shadow: 0 4px 10px rgba(37, 99, 235, 0.08);
+    font-size: 0.78rem;
+    color: var(--ink);
+}
+
+.tool-node .tool-label {
+    margin-top: 4px;
+    font-weight: 700;
+    line-height: 1.1;
+}
+
+.edge {
+    position: absolute;
+    height: 3px;
+    background: #8ea3c7;
+    border-radius: 999px;
+}
+
+.edge.live {
+    background: linear-gradient(90deg, #60a5fa, #2563eb, #22d3ee);
+    background-size: 180% 100%;
+    animation: flowShift 1.3s linear infinite;
+}
+
+.edge.dashed {
+    height: 2px;
+    background: transparent;
+    border-top: 2px dashed #8ea3c7;
+}
+
+.edge-label {
+    position: absolute;
+    font-size: 0.72rem;
+    color: #6b7280;
+    font-weight: 700;
+}
+
+.graph-summary {
+    margin-top: 6px;
+    color: #42526e;
+    font-size: 0.82rem;
+}
+
 .node-grid {
     display: grid;
     grid-template-columns: repeat(8, minmax(120px, 1fr));
@@ -267,6 +404,21 @@ html, body, [class*="css"] {
     .node-arrow {
         display: none;
     }
+
+    .graph-board {
+        min-height: 560px;
+    }
+
+    .g-node.large, .g-node.small, .g-node.router, .tool-node {
+        position: static;
+        width: auto;
+        margin: 8px;
+        border-radius: 12px;
+    }
+
+    .edge, .edge-label, .graph-title {
+        display: none;
+    }
 }
 </style>
 """,
@@ -322,6 +474,28 @@ def add_event(live_state: dict, payload) -> None:
         live_state["active_stage"] = None
 
 
+def combine_status(statuses: list[str]) -> str:
+    if any(s == "failed" for s in statuses):
+        return "failed"
+    if any(s == "running" for s in statuses):
+        return "running"
+    if statuses and all(s == "completed" for s in statuses):
+        return "completed"
+    if any(s == "completed" for s in statuses):
+        return "running"
+    return "idle"
+
+
+def safe_report_filename(query: str) -> str:
+    # Keep filename header-safe: one line, ASCII-ish, and compact.
+    normalized = re.sub(r"\s+", "_", query.strip())
+    normalized = re.sub(r"[^A-Za-z0-9._-]", "", normalized)
+    normalized = normalized.strip("._-")
+    if not normalized:
+        normalized = "research"
+    return f"research_{normalized[:40]}.md"
+
+
 def render_control_room(live_state: dict, container):
     with container.container():
         total_events = len(live_state["events"])
@@ -347,39 +521,46 @@ def render_control_room(live_state: dict, container):
             unsafe_allow_html=True,
         )
 
-        st.markdown("<div class='headline'>LangGraph-Style Pipeline</div>", unsafe_allow_html=True)
+        st.markdown("<div class='headline'>Functional Workflow Canvas</div>", unsafe_allow_html=True)
 
-        node_html = []
-        for idx, stage in enumerate(STAGE_ORDER):
-            label = STAGE_LABELS[stage]
-            stage_state = live_state["stages"][stage]
-            status = stage_state["status"]
-            dur = stage_state.get("duration_s")
-            dur_text = f"{dur:.2f}s" if isinstance(dur, (float, int)) else "-"
+        stage_states = {k: live_state["stages"][k]["status"] for k in STAGE_ORDER}
+        agent_status = combine_status(
+            [
+                stage_states["cache"],
+                stage_states["memory"],
+                stage_states["plan"],
+                stage_states["web"],
+                stage_states["arxiv"],
+                stage_states["multimodal"],
+            ]
+        )
+        router_status = stage_states["validate"]
+        response_status = stage_states["report"]
+        fallback_status = "failed" if failed > 0 else ("completed" if response_status == "completed" else "idle")
 
-            status_label = {
-                "idle": "Idle",
-                "running": "Running",
-                "completed": "Completed",
-                "failed": "Failed",
-            }.get(status, "Info")
+        cache_dur = live_state["stages"]["cache"].get("duration_s")
+        plan_dur = live_state["stages"]["plan"].get("duration_s")
+        agent_dur = "-"
+        if isinstance(cache_dur, (int, float)) or isinstance(plan_dur, (int, float)):
+            total_agent = (cache_dur or 0.0) + (plan_dur or 0.0)
+            agent_dur = f"{total_agent:.2f}s"
 
-            status_color = {
-                "idle": "#6b7280",
-                "running": "#1d4ed8",
-                "completed": "#15803d",
-                "failed": "#b91c1c",
-            }.get(status, "#374151")
+        validation_hint = "Routing by validation"
+        if live_state["events"]:
+            for event in reversed(live_state["events"]):
+                if event["stage"] == "validate":
+                    validation_hint = event["message"][:40]
+                    break
 
-            node_html.append(
-                f"<div class='node node-{status}'>"
-                f"<div class='node-name'>{label}</div>"
-                f"<div class='node-status' style='color:{status_color};'>{status_label}</div>"
-                f"<div class='node-duration'>Duration: {dur_text}</div>"
-                "</div>"
-            )
-            if idx < len(STAGE_ORDER) - 1:
-                node_html.append("<div class='node-arrow'>→</div>")
+        web_tool = stage_states["web"]
+        arxiv_tool = stage_states["arxiv"]
+        mm_tool = stage_states["multimodal"]
+        mem_tool = stage_states["memory"]
+
+        edge_1 = "live" if agent_status == "running" else ""
+        edge_2 = "live" if agent_status == "running" or router_status == "running" else ""
+        edge_3 = "live" if response_status == "running" else ""
+        edge_4 = "live" if fallback_status == "failed" else ""
 
         st.markdown(
             (
@@ -388,8 +569,76 @@ def render_control_room(live_state: dict, container):
                 "<div class='flow-track'>"
                 f"<div class='flow-fill' style='width:{progress_pct}%;'></div>"
                 "</div>"
-                f"<div style='color:#42526e;font-size:0.82rem;margin-bottom:10px;'>{progress_pct}% workflow complete</div>"
-                f"<div class='node-row'>{''.join(node_html)}</div>"
+                f"<div class='graph-summary'>{progress_pct}% workflow complete</div>"
+                "</div>"
+            ),
+            unsafe_allow_html=True,
+        )
+
+        st.markdown(
+            (
+                "<div class='graph-board'>"
+                "<div class='graph-title'>Single Agent + Tools + Router</div>"
+
+                f"<div class='edge {edge_1}' style='left:15%;top:116px;width:11%;'></div>"
+                f"<div class='edge {edge_2}' style='left:49%;top:116px;width:10%;'></div>"
+                f"<div class='edge {edge_3}' style='left:72%;top:92px;width:11%;transform:rotate(-22deg);transform-origin:left center;'></div>"
+                f"<div class='edge {edge_4}' style='left:72%;top:138px;width:11%;transform:rotate(21deg);transform-origin:left center;'></div>"
+
+                "<div class='edge-label' style='left:18%;top:98px;'>query</div>"
+                "<div class='edge-label' style='left:52%;top:98px;'>route</div>"
+                "<div class='edge-label' style='left:79%;top:66px;'>true</div>"
+                "<div class='edge-label' style='left:79%;top:168px;'>false</div>"
+
+                "<div class='g-node small state-completed' style='left:4%;top:74px;'>"
+                "<div class='g-node-title'><span class='g-dot'></span>Webhook</div>"
+                "<div class='g-node-sub'>Input Trigger</div>"
+                "</div>"
+
+                f"<div class='g-node large state-{agent_status}' style='left:26%;top:74px;'>"
+                "<div class='g-node-title'><span class='g-dot'></span>Research Agent</div>"
+                f"<div class='g-node-sub'>Planner + Parallel tools | Duration: {agent_dur}</div>"
+                "<div class='g-node-sub'>"
+                f"Web:{stage_states['web']} | ArXiv:{stage_states['arxiv']} | Vision:{stage_states['multimodal']}"
+                "</div>"
+                "</div>"
+
+                f"<div class='g-node router state-{router_status}' style='left:61%;top:78px;'>"
+                "<div class='g-node-title'><span class='g-dot'></span>Router</div>"
+                f"<div class='g-node-sub'>{validation_hint}</div>"
+                "</div>"
+
+                f"<div class='g-node small state-{response_status}' style='left:84%;top:36px;'>"
+                "<div class='g-node-title'><span class='g-dot'></span>Response A</div>"
+                "<div class='g-node-sub'>Final Report</div>"
+                "</div>"
+
+                f"<div class='g-node small state-{fallback_status}' style='left:84%;top:170px;'>"
+                "<div class='g-node-title'><span class='g-dot'></span>Response B</div>"
+                "<div class='g-node-sub'>Fallback / Error</div>"
+                "</div>"
+
+                "<div class='edge dashed' style='left:31%;top:252px;width:10%;transform:rotate(-25deg);transform-origin:left center;'></div>"
+                "<div class='edge dashed' style='left:39%;top:252px;width:9%;transform:rotate(-18deg);transform-origin:left center;'></div>"
+                "<div class='edge dashed' style='left:47%;top:252px;width:9%;transform:rotate(-12deg);transform-origin:left center;'></div>"
+                "<div class='edge dashed' style='left:55%;top:252px;width:9%;transform:rotate(-7deg);transform-origin:left center;'></div>"
+
+                f"<div class='tool-node state-{web_tool}' style='left:23%;top:286px;'>"
+                "<div>TOOL</div><div class='tool-label'>Web Search</div>"
+                "</div>"
+
+                f"<div class='tool-node state-{mem_tool}' style='left:36%;top:286px;'>"
+                "<div>MEM</div><div class='tool-label'>Memory</div>"
+                "</div>"
+
+                f"<div class='tool-node state-{arxiv_tool}' style='left:49%;top:286px;'>"
+                "<div>TOOL</div><div class='tool-label'>ArXiv</div>"
+                "</div>"
+
+                f"<div class='tool-node state-{mm_tool}' style='left:62%;top:286px;'>"
+                "<div>TOOL</div><div class='tool-label'>Vision</div>"
+                "</div>"
+
                 "</div>"
             ),
             unsafe_allow_html=True,
@@ -492,11 +741,11 @@ if run_button:
                 f.write(uploaded.read())
                 image_paths.append(f.name)
 
-    if "orchestrator" not in st.session_state:
-        with st.spinner("Initializing orchestrator..."):
-            from src.orchestrator import ResearchOrchestrator
+    with st.spinner("Initializing orchestrator..."):
+        from src.orchestrator import ResearchOrchestrator
 
-            st.session_state.orchestrator = ResearchOrchestrator()
+        # Recreate each run so code edits are reflected immediately.
+        st.session_state.orchestrator = ResearchOrchestrator()
 
     orchestrator = st.session_state.orchestrator
     live_state = init_live_state()
@@ -589,19 +838,11 @@ if run_button:
     st.download_button(
         "Download Report",
         data=result["report"],
-        file_name=f"research_{query[:30].replace(' ', '_')}.md",
+        file_name=safe_report_filename(query),
         mime="text/markdown",
     )
 
 else:
-    st.markdown("### Control Room Features")
-    st.markdown(
-        "\n".join(
-            [
-                "1. Ordered workflow timeline with timestamps.",
-                "2. Live stage status (running/completed/failed).",
-                "3. Active stage and run-time metrics.",
-                "4. Agent findings, validation, and downloadable report.",
-            ]
-        )
-    )
+    idle_state = init_live_state()
+    render_control_room(idle_state, control_room)
+    st.caption("Run a query to animate node states and route decisions in real time.")
