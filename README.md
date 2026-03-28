@@ -1,18 +1,27 @@
 # Multi-Agent Research Assistant
 
-An AI-powered research system using Claude claude-opus-4-6 with multiple specialized agents, memory layers, and contradiction detection.
+An AI-powered research system built on OpenAI models with specialized agents, memory layers, contradiction detection, and a real-time workflow UI.
 
 ## Architecture
 
 ```
 Task Query → Streamlit UI → Orchestrator
                                 ├── Memory Cache (Redis + ChromaDB)
-                                ├── Web Research Agent     → Claude + web_search
-                                ├── ArXiv Research Agent   → Claude + arxiv tool
-                                ├── Multi-Modal Agent      → Claude vision
+                                ├── Web Research Agent     → OpenAI + web_search
+                                ├── ArXiv Research Agent   → OpenAI + arxiv tool
+                                ├── Multi-Modal Agent      → OpenAI vision
                                 ├── Research Validator     → contradiction detection
                                 └── Report Generator       → final synthesis
 ```
+
+## Live Workflow UI
+
+The Streamlit app now includes a control-room view that shows:
+
+- Ordered timeline of workflow events with timestamps
+- Live stage status (`running`, `completed`, `failed`)
+- Current active stage and per-stage duration
+- Agent findings, contradictions, resolutions, and final report
 
 ## Setup
 
@@ -24,7 +33,7 @@ Task Query → Streamlit UI → Orchestrator
 2. **Configure environment**
    ```bash
    cp .env.example .env
-   # Edit .env and add your ANTHROPIC_API_KEY
+   # Edit .env and add your OPENAI_API_KEY
    ```
 
 3. **Run**

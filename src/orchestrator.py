@@ -1,6 +1,7 @@
 """Main Orchestrator — coordinates all agents, memory, validation, and reporting."""
 import os
 import json
+import time
 import concurrent.futures
 from typing import Callable
 from openai import OpenAI
@@ -68,80 +69,104 @@ Guidelines:
         query: str,
         image_urls: list[str] = None,
         image_paths: list[str] = None,
-        progress_callback: Callable[[str, str], None] = None,
+        progress_callback: Callable | None = None,
     ) -> dict:
-        def emit(stage: str, msg: str):
+        def emit(stage: str, msg: str, status: str = "info", meta: dict | None = None):
             if progress_callback:
-                progress_callback(stage, msg)
+                event = {
+                    "stage": stage,
+                    "message": msg,
+                    "status": status,
+                    "timestamp": time.time(),
+                }
+                if meta:
+                    event.update(meta)
+                try:
+                    progress_callback(event)
+                except TypeError:
+                    # Backward compatibility for older callback signature.
+                    progress_callback(stage, msg)
 
         # 1. Cache check
-        emit("cache", "Checking research cache...")
+        emit("cache", "Checking research cache...", "running")
         cached = self.cache.get(query)
         if cached:
-            emit("cache", "✅ Found cached results!")
+            emit("cache", "Found cached results", "completed", {"from_cache": True})
             return cached
+        emit("cache", "No cached results found", "completed")
 
         # 2. Similar past research
-        emit("memory", "Searching past research...")
+        emit("memory", "Searching past research...", "running")
         similar = self.vector_store.query_similar(query, n_results=2)
         if similar:
-            emit("memory", f"Found {len(similar)} related past research entries")
+            emit("memory", f"Found {len(similar)} related past research entries", "completed")
+        else:
+            emit("memory", "No similar past research entries", "completed")
 
         # 3. Plan
-        emit("plan", "Planning research strategy...")
+        emit("plan", "Planning research strategy...", "running")
         plan = self.plan_research(query)
-        emit("plan", f"Strategy: {plan.get('rationale', 'Multi-agent approach')}")
+        emit("plan", f"Strategy ready: {plan.get('rationale', 'Multi-agent approach')}", "completed")
 
         # 4. Run agents in parallel
         agent_results = []
-        futures = {}
+        future_to_stage = {}
+        start_times = {}
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
             if plan.get("use_web", True):
-                emit("web", "🌐 Web Research Agent starting...")
-                futures["web"] = executor.submit(self.web_agent.research, query, focus=plan.get("web_focus", ""))
+                stage = "web"
+                emit(stage, "Web Research Agent starting", "running")
+                start_times[stage] = time.time()
+                future_to_stage[executor.submit(self.web_agent.research, query, focus=plan.get("web_focus", ""))] = stage
 
             if plan.get("use_arxiv", True):
-                emit("arxiv", "📚 ArXiv Research Agent starting...")
-                futures["arxiv"] = executor.submit(self.arxiv_agent.research, plan.get("arxiv_focus", query))
+                stage = "arxiv"
+                emit(stage, "ArXiv Research Agent starting", "running")
+                start_times[stage] = time.time()
+                future_to_stage[executor.submit(self.arxiv_agent.research, plan.get("arxiv_focus", query))] = stage
 
             has_visuals = bool(image_urls or image_paths)
             if plan.get("use_multimodal", False) or has_visuals:
-                emit("multimodal", "🖼️  Multi-Modal Agent starting...")
-                futures["multimodal"] = executor.submit(
+                stage = "multimodal"
+                emit(stage, "Multi-Modal Agent starting", "running")
+                start_times[stage] = time.time()
+                future_to_stage[executor.submit(
                     self.multimodal_agent.research, query, image_urls=image_urls or [], image_paths=image_paths or []
-                )
+                )] = stage
 
-            for name, future in futures.items():
+            for future in concurrent.futures.as_completed(future_to_stage):
+                stage = future_to_stage[future]
+                duration = round(time.time() - start_times.get(stage, time.time()), 2)
                 try:
                     result = future.result(timeout=120)
                     agent_results.append(result)
-                    emit(name, f"✅ {result['agent']} completed")
+                    emit(stage, f"{result['agent']} completed", "completed", {"duration_s": duration})
                 except Exception as e:
-                    emit(name, f"⚠️  {name} agent error: {e}")
+                    emit(stage, f"{stage} agent error: {e}", "failed", {"duration_s": duration})
 
         if not agent_results:
             return {"error": "All agents failed", "query": query}
 
         # 5. Validate
-        emit("validate", "🔍 Research Validator checking for contradictions...")
+        emit("validate", "Research Validator checking for contradictions...", "running")
         validation = self.validator.validate(query, agent_results)
 
         resolutions = []
         if validation.get("has_contradictions"):
             contradictions = validation.get("contradictions", [])
-            emit("validate", f"⚠️  Found {len(contradictions)} contradiction(s) — resolving...")
+            emit("validate", f"Found {len(contradictions)} contradiction(s), resolving...", "running")
             for c in contradictions:
                 desc = f"{c.get('topic')}: {c.get('claim_a')} vs {c.get('claim_b')}"
                 resolutions.append(self.web_agent.resolve_contradiction(desc))
-            emit("validate", "✅ Contradictions resolved")
+            emit("validate", "Contradictions resolved", "completed")
         else:
-            emit("validate", "✅ No contradictions found")
+            emit("validate", "No contradictions found", "completed")
 
         # 6. Generate report
-        emit("report", "📝 Generating final research report...")
+        emit("report", "Generating final research report...", "running")
         report = self.report_gen.generate(query, agent_results, validation, resolutions)
-        emit("report", "✅ Report complete")
+        emit("report", "Report complete", "completed")
 
         # 7. Persist
         result = {
