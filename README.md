@@ -14,14 +14,16 @@ Task Query → Streamlit UI → Orchestrator
                                 └── Report Generator       → final synthesis
 ```
 
-## Live Workflow UI
+## Production UI
 
-The Streamlit app now includes a control-room view that shows:
+The Streamlit frontend now uses a split-pane production layout:
 
-- Ordered timeline of workflow events with timestamps
-- Live stage status (`running`, `completed`, `failed`)
-- Current active stage and per-stage duration
-- Agent findings, contradictions, resolutions, and final report
+- **Left pane**: query input, chat-style history, and in-page report viewer
+- **Right pane**: live operations dashboard with stage KPIs and event stream
+- **Workflow canvas**: node-based Webhook -> Agent -> Router -> Response view
+- **Live updates**: stage state and event timeline update in real time during run
+
+You can read the generated report directly in the web UI and download it as markdown.
 
 ## Setup
 

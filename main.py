@@ -1,4 +1,4 @@
-"""Multi-Agent Research Assistant with a live workflow control room."""
+"""Production-style Streamlit UI for the multi-agent research assistant."""
 import os
 import re
 import tempfile
@@ -11,8 +11,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 st.set_page_config(
-    page_title="Research Multi-Agent Control Room",
-    page_icon="R",
+    page_title="Research Assistant Studio",
+    page_icon="RS",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -20,10 +20,10 @@ st.set_page_config(
 STAGE_LABELS = {
     "cache": "Cache",
     "memory": "Memory",
-    "plan": "Planning",
+    "plan": "Planner",
     "web": "Web Agent",
     "arxiv": "ArXiv Agent",
-    "multimodal": "Multi-Modal Agent",
+    "multimodal": "Vision Agent",
     "validate": "Validator",
     "report": "Report Builder",
 }
@@ -39,386 +39,257 @@ STAGE_ORDER = [
     "report",
 ]
 
+STATUS_META = {
+    "idle": {"label": "Idle", "color": "#6b7280", "bg": "#f3f4f6"},
+    "running": {"label": "Running", "color": "#1d4ed8", "bg": "#e0edff"},
+    "completed": {"label": "Completed", "color": "#166534", "bg": "#dcfce7"},
+    "failed": {"label": "Failed", "color": "#991b1b", "bg": "#fee2e2"},
+}
+
 st.markdown(
     """
 <style>
 :root {
-    --ink: #102036;
-    --muted: #42526e;
-    --accent: #0d9488;
-    --panel: #f7fbff;
-    --edge: #c9d8ee;
-    --flow: #1d4ed8;
-    --flow-soft: #dbeafe;
-    --good: #166534;
-    --warn: #9a3412;
-    --bad: #991b1b;
+  --ink: #0f223b;
+  --muted: #475569;
+  --soft: #eff6ff;
+  --panel: #ffffff;
+  --edge: #d7e3f3;
+  --brand-a: #0ea5e9;
+  --brand-b: #2563eb;
+  --ok: #16a34a;
+  --warn: #ea580c;
+  --bad: #dc2626;
 }
 
 html, body, [class*="css"] {
-    font-family: "Segoe UI", "Trebuchet MS", sans-serif;
+  font-family: "Segoe UI", "Trebuchet MS", sans-serif;
 }
 
 .stApp {
-    background:
-      radial-gradient(900px 400px at -5% -15%, #dbeafe 0%, transparent 65%),
-      radial-gradient(900px 500px at 110% -30%, #d1fae5 0%, transparent 55%),
-      linear-gradient(180deg, #f8fbff 0%, #f3f6fb 100%);
+  background:
+    radial-gradient(900px 500px at -5% -20%, #dbeafe 0%, transparent 68%),
+    radial-gradient(800px 500px at 110% -10%, #ccfbf1 0%, transparent 56%),
+    linear-gradient(180deg, #f7fbff 0%, #f2f6fc 100%);
 }
 
-.control-card {
-    border: 1px solid var(--edge);
-    background: white;
-    border-radius: 14px;
-    padding: 14px 16px;
-    margin-bottom: 10px;
-    box-shadow: 0 3px 10px rgba(15, 23, 42, 0.05);
+.topbar {
+  border: 1px solid var(--edge);
+  background: linear-gradient(120deg, #ffffff 0%, #f8fbff 100%);
+  border-radius: 14px;
+  padding: 14px 16px;
+  margin-bottom: 10px;
 }
 
-.headline {
-    color: var(--ink);
-    font-weight: 700;
-    letter-spacing: 0.2px;
-    margin: 8px 0 2px;
+.topbar-title {
+  color: var(--ink);
+  font-weight: 900;
+  font-size: 1.25rem;
+  letter-spacing: 0.2px;
+}
+
+.topbar-sub {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.panel {
+  border: 1px solid var(--edge);
+  background: var(--panel);
+  border-radius: 14px;
+  padding: 14px;
+  margin-bottom: 12px;
+  box-shadow: 0 4px 14px rgba(15, 34, 59, 0.05);
+}
+
+.panel-title {
+  color: var(--ink);
+  font-weight: 800;
+  margin-bottom: 8px;
+}
+
+.chat-wrap {
+  max-height: 360px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.msg {
+  border-radius: 12px;
+  padding: 10px 12px;
+  margin: 8px 0;
+  line-height: 1.45;
+  border: 1px solid var(--edge);
+}
+
+.msg.user {
+  background: #eef6ff;
+  border-color: #bfdbfe;
+}
+
+.msg.assistant {
+  background: #f8fafc;
+}
+
+.msg-role {
+  font-size: 0.75rem;
+  font-weight: 800;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  margin-bottom: 5px;
 }
 
 .kpi-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-    gap: 10px;
-    margin-bottom: 12px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
 }
 
-.kpi-card {
-    border: 1px solid var(--edge);
-    border-radius: 12px;
-    background: white;
-    padding: 10px 12px;
+.kpi {
+  border: 1px solid var(--edge);
+  border-radius: 10px;
+  background: #f9fbff;
+  padding: 8px 10px;
 }
 
-.kpi-label {
-    color: var(--muted);
-    font-size: 0.8rem;
-    font-weight: 600;
+.kpi-l {
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 700;
 }
 
-.kpi-value {
-    color: var(--ink);
-    font-size: 1.3rem;
-    font-weight: 800;
-}
-
-.flow-wrap {
-    border: 1px solid var(--edge);
-    border-radius: 12px;
-    background: white;
-    padding: 12px;
-    margin-bottom: 12px;
-}
-
-.flow-title {
-    color: var(--ink);
-    font-weight: 700;
-    margin-bottom: 8px;
+.kpi-v {
+  color: var(--ink);
+  font-size: 1.15rem;
+  font-weight: 900;
 }
 
 .flow-track {
-    width: 100%;
-    height: 12px;
-    border-radius: 999px;
-    background: #e7edf7;
-    overflow: hidden;
-    border: 1px solid #d7e2f2;
-    margin: 6px 0 12px;
+  width: 100%;
+  height: 10px;
+  border-radius: 999px;
+  border: 1px solid #d3def0;
+  background: #eaf0fa;
+  overflow: hidden;
+  margin: 6px 0 10px;
 }
 
 .flow-fill {
-    height: 100%;
-    width: 0%;
-    border-radius: 999px;
-    background: linear-gradient(90deg, #0ea5e9, #2563eb, #14b8a6);
-    background-size: 180% 100%;
-    animation: flowShift 1.7s linear infinite;
-    transition: width 0.35s ease;
+  height: 100%;
+  width: 0%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--brand-a), var(--brand-b), #14b8a6);
+  background-size: 180% 100%;
+  animation: flowShift 1.6s linear infinite;
+  transition: width 0.35s ease;
 }
 
-.graph-board {
-    position: relative;
-    border: 1px solid var(--edge);
-    border-radius: 14px;
-    background: linear-gradient(180deg, #f7fbff 0%, #f2f7ff 100%);
-    min-height: 420px;
-    overflow: hidden;
-    margin-bottom: 12px;
+.stage-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
 }
 
-.graph-title {
-    position: absolute;
-    top: 10px;
-    left: 14px;
-    color: var(--ink);
-    font-size: 1.05rem;
-    font-weight: 800;
+.stage-card {
+  border: 1px solid var(--edge);
+  border-radius: 10px;
+  background: #fff;
+  padding: 8px;
 }
 
-.g-node {
-    position: absolute;
-    border: 2px solid #c9d8ee;
-    border-radius: 12px;
-    background: #ffffff;
-    color: var(--ink);
-    box-shadow: 0 4px 14px rgba(16, 32, 54, 0.08);
-    padding: 10px;
+.stage-name {
+  color: var(--ink);
+  font-size: 0.82rem;
+  font-weight: 800;
 }
 
-.g-node.large {
-    width: 270px;
-    min-height: 96px;
+.pill {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 2px 9px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  margin-top: 4px;
 }
 
-.g-node.small {
-    width: 150px;
-    min-height: 80px;
+.stage-meta {
+  color: var(--muted);
+  font-size: 0.74rem;
+  margin-top: 4px;
 }
 
-.g-node.router {
-    width: 140px;
-    min-height: 90px;
-}
-
-.g-node-title {
-    font-size: 0.95rem;
-    font-weight: 800;
-    line-height: 1.2;
-}
-
-.g-node-sub {
-    font-size: 0.8rem;
-    color: var(--muted);
-    margin-top: 4px;
-}
-
-.g-dot {
-    width: 10px;
-    height: 10px;
-    border-radius: 999px;
-    display: inline-block;
-    margin-right: 6px;
-    background: #9ca3af;
-}
-
-.state-idle { border-color: #cbd5e1; background: #f8fafc; }
-.state-idle .g-dot { background: #94a3b8; }
-
-.state-running {
-    border-color: #2563eb;
-    background: #eff6ff;
-    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14), 0 4px 14px rgba(16, 32, 54, 0.1);
-}
-.state-running .g-dot { background: #2563eb; }
-
-.state-completed { border-color: #16a34a; background: #f0fdf4; }
-.state-completed .g-dot { background: #16a34a; }
-
-.state-failed { border-color: #dc2626; background: #fef2f2; }
-.state-failed .g-dot { background: #dc2626; }
-
-.tool-node {
-    position: absolute;
-    width: 112px;
-    min-height: 86px;
-    border: 2px solid #c7d2fe;
-    border-radius: 999px;
-    background: #ffffff;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    align-items: center;
-    text-align: center;
-    box-shadow: 0 4px 10px rgba(37, 99, 235, 0.08);
-    font-size: 0.78rem;
-    color: var(--ink);
-}
-
-.tool-node .tool-label {
-    margin-top: 4px;
-    font-weight: 700;
-    line-height: 1.1;
-}
-
-.edge {
-    position: absolute;
-    height: 3px;
-    background: #8ea3c7;
-    border-radius: 999px;
-}
-
-.edge.live {
-    background: linear-gradient(90deg, #60a5fa, #2563eb, #22d3ee);
-    background-size: 180% 100%;
-    animation: flowShift 1.3s linear infinite;
-}
-
-.edge.dashed {
-    height: 2px;
-    background: transparent;
-    border-top: 2px dashed #8ea3c7;
-}
-
-.edge-label {
-    position: absolute;
-    font-size: 0.72rem;
-    color: #6b7280;
-    font-weight: 700;
-}
-
-.graph-summary {
-    margin-top: 6px;
-    color: #42526e;
-    font-size: 0.82rem;
-}
-
-.node-grid {
-    display: grid;
-    grid-template-columns: repeat(8, minmax(120px, 1fr));
-    gap: 8px;
+.canvas {
+  position: relative;
+  min-height: 230px;
+  border: 1px solid var(--edge);
+  background: linear-gradient(180deg, #f8fbff 0%, #f2f7ff 100%);
+  border-radius: 12px;
+  overflow: hidden;
+  margin-top: 10px;
 }
 
 .node {
-    border: 1px solid var(--edge);
-    border-radius: 10px;
-    background: var(--panel);
-    padding: 8px;
-    min-height: 74px;
-    position: relative;
+  position: absolute;
+  border: 2px solid #cdd9ed;
+  border-radius: 11px;
+  background: #fff;
+  padding: 8px;
+  box-shadow: 0 3px 10px rgba(15, 34, 59, 0.05);
+  color: var(--ink);
 }
 
-.node-name {
-    color: var(--ink);
-    font-size: 0.82rem;
-    font-weight: 700;
+.node .t {
+  font-size: 0.82rem;
+  font-weight: 900;
 }
 
-.node-status {
-    font-size: 0.74rem;
-    font-weight: 700;
-    margin-top: 4px;
+.node .s {
+  font-size: 0.73rem;
+  color: var(--muted);
+  margin-top: 3px;
 }
 
-.node-duration {
-    color: var(--muted);
-    font-size: 0.75rem;
-    margin-top: 6px;
+.node.idle { border-color: #cbd5e1; background: #f8fafc; }
+.node.running { border-color: #2563eb; background: #eff6ff; }
+.node.completed { border-color: #16a34a; background: #f0fdf4; }
+.node.failed { border-color: #dc2626; background: #fef2f2; }
+
+.edge {
+  position: absolute;
+  height: 3px;
+  border-radius: 999px;
+  background: #8ea3c7;
 }
 
-.node-idle { border-color: #d1d5db; background: #f8fafc; }
-.node-running {
-    border-color: #1d4ed8;
-    background: #eff6ff;
-    box-shadow: 0 0 0 2px rgba(29, 78, 216, 0.12) inset;
-}
-.node-completed { border-color: #16a34a; background: #f0fdf4; }
-.node-failed { border-color: #dc2626; background: #fef2f2; }
-
-.node-running::after {
-    content: "";
-    position: absolute;
-    inset: -2px;
-    border-radius: 11px;
-    border: 2px solid rgba(29, 78, 216, 0.45);
-    animation: pulseNode 1.2s ease-in-out infinite;
+.edge.live {
+  background: linear-gradient(90deg, #60a5fa, #2563eb, #22d3ee);
+  background-size: 170% 100%;
+  animation: flowShift 1.2s linear infinite;
 }
 
-.node-arrow {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: #2563eb;
-    font-weight: 900;
-    font-size: 1.1rem;
+.event {
+  border-left: 3px solid #1d4ed8;
+  border-radius: 6px;
+  background: #f8faff;
+  padding: 6px 8px;
+  margin: 7px 0;
 }
 
-.node-row {
-    display: grid;
-    grid-template-columns: repeat(15, minmax(30px, 1fr));
-    gap: 6px;
-    align-items: stretch;
+.event-time {
+  color: var(--muted);
+  font-size: 0.72rem;
 }
 
-.timeline-item {
-    border-left: 3px solid var(--flow);
-    margin: 8px 0;
-    padding: 6px 10px;
-    background: #f8faff;
-    border-radius: 6px;
-    color: var(--ink);
-}
-
-.stage-pill {
-    border-radius: 999px;
-    padding: 2px 10px;
-    font-size: 0.75rem;
-    font-weight: 700;
-    display: inline-block;
-    margin-left: 8px;
-}
-
-.timeline-item {
-    border-left: 3px solid var(--flow);
-}
-
-.timeline-time {
-    color: var(--muted);
-    font-size: 0.78rem;
-}
-
-.agent-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-    gap: 10px;
-    margin-top: 8px;
-}
-
-.agent-card {
-    border: 1px solid var(--edge);
-    border-radius: 10px;
-    padding: 10px;
-    background: var(--panel);
+.small-muted {
+  color: var(--muted);
+  font-size: 0.8rem;
 }
 
 @keyframes flowShift {
-    0% { background-position: 0% 50%; }
-    100% { background-position: 180% 50%; }
-}
-
-@keyframes pulseNode {
-    0% { opacity: 0.9; transform: scale(1); }
-    70% { opacity: 0.15; transform: scale(1.015); }
-    100% { opacity: 0.9; transform: scale(1); }
-}
-
-@media (max-width: 1100px) {
-    .node-row {
-        grid-template-columns: repeat(8, minmax(100px, 1fr));
-    }
-    .node-arrow {
-        display: none;
-    }
-
-    .graph-board {
-        min-height: 560px;
-    }
-
-    .g-node.large, .g-node.small, .g-node.router, .tool-node {
-        position: static;
-        width: auto;
-        margin: 8px;
-        border-radius: 12px;
-    }
-
-    .edge, .edge-label, .graph-title {
-        display: none;
-    }
+  0% { background-position: 0% 50%; }
+  100% { background-position: 180% 50%; }
 }
 </style>
 """,
@@ -429,31 +300,43 @@ html, body, [class*="css"] {
 def init_live_state() -> dict:
     return {
         "events": [],
-        "stages": {k: {"status": "idle", "duration_s": None} for k in STAGE_ORDER},
+        "stages": {name: {"status": "idle", "duration_s": None} for name in STAGE_ORDER},
         "active_stage": None,
         "run_start": None,
     }
 
 
+def init_session_state() -> None:
+    if "chat_messages" not in st.session_state:
+        st.session_state.chat_messages = [
+            {
+                "role": "assistant",
+                "content": "Welcome. Ask a research question and I will orchestrate multiple agents.",
+            }
+        ]
+    if "last_result" not in st.session_state:
+        st.session_state.last_result = None
+    if "live_state" not in st.session_state:
+        st.session_state.live_state = init_live_state()
+
+
 def normalize_event(payload) -> dict:
     if isinstance(payload, dict):
-        stage = payload.get("stage", "unknown")
-        message = payload.get("message", "")
-        status = payload.get("status", "info")
-        timestamp = payload.get("timestamp", time.time())
-        duration_s = payload.get("duration_s")
-    else:
-        stage, message = payload
-        status = "info"
-        timestamp = time.time()
-        duration_s = None
+        return {
+            "stage": payload.get("stage", "unknown"),
+            "message": str(payload.get("message", "")),
+            "status": payload.get("status", "info"),
+            "timestamp": float(payload.get("timestamp", time.time())),
+            "duration_s": payload.get("duration_s"),
+        }
 
+    stage, message = payload
     return {
         "stage": stage,
         "message": str(message),
-        "status": status,
-        "timestamp": float(timestamp),
-        "duration_s": duration_s,
+        "status": "info",
+        "timestamp": time.time(),
+        "duration_s": None,
     }
 
 
@@ -465,8 +348,8 @@ def add_event(live_state: dict, payload) -> None:
     if stage in live_state["stages"]:
         if event["status"] in {"running", "completed", "failed"}:
             live_state["stages"][stage]["status"] = event["status"]
-        if event["duration_s"] is not None:
-            live_state["stages"][stage]["duration_s"] = event["duration_s"]
+        if isinstance(event["duration_s"], (int, float)):
+            live_state["stages"][stage]["duration_s"] = float(event["duration_s"])
 
     if event["status"] == "running":
         live_state["active_stage"] = stage
@@ -474,20 +357,23 @@ def add_event(live_state: dict, payload) -> None:
         live_state["active_stage"] = None
 
 
-def combine_status(statuses: list[str]) -> str:
-    if any(s == "failed" for s in statuses):
+def stage_status(live_state: dict, stage: str) -> str:
+    return live_state["stages"].get(stage, {}).get("status", "idle")
+
+
+def combine_status(values: list[str]) -> str:
+    if any(v == "failed" for v in values):
         return "failed"
-    if any(s == "running" for s in statuses):
+    if any(v == "running" for v in values):
         return "running"
-    if statuses and all(s == "completed" for s in statuses):
+    if values and all(v == "completed" for v in values):
         return "completed"
-    if any(s == "completed" for s in statuses):
+    if any(v == "completed" for v in values):
         return "running"
     return "idle"
 
 
 def safe_report_filename(query: str) -> str:
-    # Keep filename header-safe: one line, ASCII-ish, and compact.
     normalized = re.sub(r"\s+", "_", query.strip())
     normalized = re.sub(r"[^A-Za-z0-9._-]", "", normalized)
     normalized = normalized.strip("._-")
@@ -496,207 +382,186 @@ def safe_report_filename(query: str) -> str:
     return f"research_{normalized[:40]}.md"
 
 
-def render_control_room(live_state: dict, container):
+def render_chat(messages: list[dict], container) -> None:
     with container.container():
-        total_events = len(live_state["events"])
-        completed = sum(1 for s in live_state["stages"].values() if s["status"] == "completed")
-        failed = sum(1 for s in live_state["stages"].values() if s["status"] == "failed")
+        st.markdown("<div class='panel-title'>Conversation</div>", unsafe_allow_html=True)
+        st.markdown("<div class='chat-wrap'>", unsafe_allow_html=True)
+        for item in messages[-14:]:
+            role = item.get("role", "assistant")
+            content = item.get("content", "")
+            role_text = "You" if role == "user" else "Assistant"
+            st.markdown(
+                (
+                    f"<div class='msg {role}'>"
+                    f"<div class='msg-role'>{role_text}</div>"
+                    f"<div>{content}</div>"
+                    "</div>"
+                ),
+                unsafe_allow_html=True,
+            )
+        st.markdown("</div>", unsafe_allow_html=True)
+
+
+def render_dashboard(live_state: dict, container) -> None:
+    with container.container():
+        completed_count = sum(1 for stage in STAGE_ORDER if stage_status(live_state, stage) == "completed")
+        failed_count = sum(1 for stage in STAGE_ORDER if stage_status(live_state, stage) == "failed")
+        progress = int((completed_count / len(STAGE_ORDER)) * 100)
         run_time = 0.0
-        if live_state["run_start"]:
+        if live_state.get("run_start"):
             run_time = time.time() - live_state["run_start"]
 
-        current = STAGE_LABELS.get(live_state.get("active_stage"), "Idle")
-        progress_pct = int((completed / len(STAGE_ORDER)) * 100)
+        active = live_state.get("active_stage")
+        active_label = STAGE_LABELS.get(active, "Idle")
 
-        st.markdown("<div class='headline'>Execution Overview</div>", unsafe_allow_html=True)
+        st.markdown("<div class='panel-title'>Agent Operations Dashboard</div>", unsafe_allow_html=True)
+
         st.markdown(
             (
                 "<div class='kpi-grid'>"
-                f"<div class='kpi-card'><div class='kpi-label'>Run Time</div><div class='kpi-value'>{run_time:.1f}s</div></div>"
-                f"<div class='kpi-card'><div class='kpi-label'>Completed</div><div class='kpi-value'>{completed}/{len(STAGE_ORDER)}</div></div>"
-                f"<div class='kpi-card'><div class='kpi-label'>Active Node</div><div class='kpi-value'>{current}</div></div>"
-                f"<div class='kpi-card'><div class='kpi-label'>Failures</div><div class='kpi-value'>{failed}</div></div>"
+                f"<div class='kpi'><div class='kpi-l'>Run Time</div><div class='kpi-v'>{run_time:.1f}s</div></div>"
+                f"<div class='kpi'><div class='kpi-l'>Progress</div><div class='kpi-v'>{progress}%</div></div>"
+                f"<div class='kpi'><div class='kpi-l'>Active Stage</div><div class='kpi-v'>{active_label}</div></div>"
+                f"<div class='kpi'><div class='kpi-l'>Failures</div><div class='kpi-v'>{failed_count}</div></div>"
                 "</div>"
             ),
             unsafe_allow_html=True,
         )
 
-        st.markdown("<div class='headline'>Functional Workflow Canvas</div>", unsafe_allow_html=True)
+        st.markdown(
+            (
+                "<div class='flow-track'>"
+                f"<div class='flow-fill' style='width:{progress}%;'></div>"
+                "</div>"
+            ),
+            unsafe_allow_html=True,
+        )
 
-        stage_states = {k: live_state["stages"][k]["status"] for k in STAGE_ORDER}
-        agent_status = combine_status(
+        stage_cards = []
+        for stage in STAGE_ORDER:
+            current = stage_status(live_state, stage)
+            meta = STATUS_META.get(current, STATUS_META["idle"])
+            duration = live_state["stages"][stage].get("duration_s")
+            d_text = f"{duration:.2f}s" if isinstance(duration, (int, float)) else "-"
+            stage_cards.append(
+                (
+                    "<div class='stage-card'>"
+                    f"<div class='stage-name'>{STAGE_LABELS[stage]}</div>"
+                    f"<span class='pill' style='color:{meta['color']};background:{meta['bg']};border:1px solid {meta['color']};'>{meta['label']}</span>"
+                    f"<div class='stage-meta'>Duration: {d_text}</div>"
+                    "</div>"
+                )
+            )
+
+        st.markdown(f"<div class='stage-grid'>{''.join(stage_cards)}</div>", unsafe_allow_html=True)
+
+        agent_state = combine_status(
             [
-                stage_states["cache"],
-                stage_states["memory"],
-                stage_states["plan"],
-                stage_states["web"],
-                stage_states["arxiv"],
-                stage_states["multimodal"],
+                stage_status(live_state, "cache"),
+                stage_status(live_state, "memory"),
+                stage_status(live_state, "plan"),
+                stage_status(live_state, "web"),
+                stage_status(live_state, "arxiv"),
+                stage_status(live_state, "multimodal"),
             ]
         )
-        router_status = stage_states["validate"]
-        response_status = stage_states["report"]
-        fallback_status = "failed" if failed > 0 else ("completed" if response_status == "completed" else "idle")
+        router_state = stage_status(live_state, "validate")
+        report_state = stage_status(live_state, "report")
+        fallback_state = "failed" if failed_count else ("completed" if report_state == "completed" else "idle")
 
-        cache_dur = live_state["stages"]["cache"].get("duration_s")
-        plan_dur = live_state["stages"]["plan"].get("duration_s")
-        agent_dur = "-"
-        if isinstance(cache_dur, (int, float)) or isinstance(plan_dur, (int, float)):
-            total_agent = (cache_dur or 0.0) + (plan_dur or 0.0)
-            agent_dur = f"{total_agent:.2f}s"
-
-        validation_hint = "Routing by validation"
-        if live_state["events"]:
-            for event in reversed(live_state["events"]):
-                if event["stage"] == "validate":
-                    validation_hint = event["message"][:40]
-                    break
-
-        web_tool = stage_states["web"]
-        arxiv_tool = stage_states["arxiv"]
-        mm_tool = stage_states["multimodal"]
-        mem_tool = stage_states["memory"]
-
-        edge_1 = "live" if agent_status == "running" else ""
-        edge_2 = "live" if agent_status == "running" or router_status == "running" else ""
-        edge_3 = "live" if response_status == "running" else ""
-        edge_4 = "live" if fallback_status == "failed" else ""
+        edge_1 = "live" if agent_state == "running" else ""
+        edge_2 = "live" if agent_state == "running" or router_state == "running" else ""
+        edge_3 = "live" if report_state == "running" else ""
+        edge_4 = "live" if fallback_state == "failed" else ""
 
         st.markdown(
             (
-                "<div class='flow-wrap'>"
-                "<div class='flow-title'>Flowing Status Bar</div>"
-                "<div class='flow-track'>"
-                f"<div class='flow-fill' style='width:{progress_pct}%;'></div>"
+                "<div class='canvas'>"
+                f"<div class='edge {edge_1}' style='left:14%;top:83px;width:13%;'></div>"
+                f"<div class='edge {edge_2}' style='left:51%;top:83px;width:9%;'></div>"
+                f"<div class='edge {edge_3}' style='left:72%;top:63px;width:10%;transform:rotate(-19deg);transform-origin:left center;'></div>"
+                f"<div class='edge {edge_4}' style='left:72%;top:104px;width:10%;transform:rotate(19deg);transform-origin:left center;'></div>"
+                "<div class='node completed' style='left:3%;top:45px;width:120px;'>"
+                "<div class='t'>Webhook</div><div class='s'>Input Trigger</div>"
                 "</div>"
-                f"<div class='graph-summary'>{progress_pct}% workflow complete</div>"
+                f"<div class='node {agent_state}' style='left:27%;top:40px;width:245px;'>"
+                "<div class='t'>Research Agent + Tools</div><div class='s'>Plan + execute Web/ArXiv/Vision</div>"
+                "</div>"
+                f"<div class='node {router_state}' style='left:60%;top:45px;width:130px;'>"
+                "<div class='t'>Router</div><div class='s'>Validation logic</div>"
+                "</div>"
+                f"<div class='node {report_state}' style='left:82%;top:20px;width:120px;'>"
+                "<div class='t'>Response A</div><div class='s'>Final Report</div>"
+                "</div>"
+                f"<div class='node {fallback_state}' style='left:82%;top:114px;width:120px;'>"
+                "<div class='t'>Response B</div><div class='s'>Fallback</div>"
+                "</div>"
                 "</div>"
             ),
             unsafe_allow_html=True,
         )
 
-        st.markdown(
-            (
-                "<div class='graph-board'>"
-                "<div class='graph-title'>Single Agent + Tools + Router</div>"
-
-                f"<div class='edge {edge_1}' style='left:15%;top:116px;width:11%;'></div>"
-                f"<div class='edge {edge_2}' style='left:49%;top:116px;width:10%;'></div>"
-                f"<div class='edge {edge_3}' style='left:72%;top:92px;width:11%;transform:rotate(-22deg);transform-origin:left center;'></div>"
-                f"<div class='edge {edge_4}' style='left:72%;top:138px;width:11%;transform:rotate(21deg);transform-origin:left center;'></div>"
-
-                "<div class='edge-label' style='left:18%;top:98px;'>query</div>"
-                "<div class='edge-label' style='left:52%;top:98px;'>route</div>"
-                "<div class='edge-label' style='left:79%;top:66px;'>true</div>"
-                "<div class='edge-label' style='left:79%;top:168px;'>false</div>"
-
-                "<div class='g-node small state-completed' style='left:4%;top:74px;'>"
-                "<div class='g-node-title'><span class='g-dot'></span>Webhook</div>"
-                "<div class='g-node-sub'>Input Trigger</div>"
-                "</div>"
-
-                f"<div class='g-node large state-{agent_status}' style='left:26%;top:74px;'>"
-                "<div class='g-node-title'><span class='g-dot'></span>Research Agent</div>"
-                f"<div class='g-node-sub'>Planner + Parallel tools | Duration: {agent_dur}</div>"
-                "<div class='g-node-sub'>"
-                f"Web:{stage_states['web']} | ArXiv:{stage_states['arxiv']} | Vision:{stage_states['multimodal']}"
-                "</div>"
-                "</div>"
-
-                f"<div class='g-node router state-{router_status}' style='left:61%;top:78px;'>"
-                "<div class='g-node-title'><span class='g-dot'></span>Router</div>"
-                f"<div class='g-node-sub'>{validation_hint}</div>"
-                "</div>"
-
-                f"<div class='g-node small state-{response_status}' style='left:84%;top:36px;'>"
-                "<div class='g-node-title'><span class='g-dot'></span>Response A</div>"
-                "<div class='g-node-sub'>Final Report</div>"
-                "</div>"
-
-                f"<div class='g-node small state-{fallback_status}' style='left:84%;top:170px;'>"
-                "<div class='g-node-title'><span class='g-dot'></span>Response B</div>"
-                "<div class='g-node-sub'>Fallback / Error</div>"
-                "</div>"
-
-                "<div class='edge dashed' style='left:31%;top:252px;width:10%;transform:rotate(-25deg);transform-origin:left center;'></div>"
-                "<div class='edge dashed' style='left:39%;top:252px;width:9%;transform:rotate(-18deg);transform-origin:left center;'></div>"
-                "<div class='edge dashed' style='left:47%;top:252px;width:9%;transform:rotate(-12deg);transform-origin:left center;'></div>"
-                "<div class='edge dashed' style='left:55%;top:252px;width:9%;transform:rotate(-7deg);transform-origin:left center;'></div>"
-
-                f"<div class='tool-node state-{web_tool}' style='left:23%;top:286px;'>"
-                "<div>TOOL</div><div class='tool-label'>Web Search</div>"
-                "</div>"
-
-                f"<div class='tool-node state-{mem_tool}' style='left:36%;top:286px;'>"
-                "<div>MEM</div><div class='tool-label'>Memory</div>"
-                "</div>"
-
-                f"<div class='tool-node state-{arxiv_tool}' style='left:49%;top:286px;'>"
-                "<div>TOOL</div><div class='tool-label'>ArXiv</div>"
-                "</div>"
-
-                f"<div class='tool-node state-{mm_tool}' style='left:62%;top:286px;'>"
-                "<div>TOOL</div><div class='tool-label'>Vision</div>"
-                "</div>"
-
-                "</div>"
-            ),
-            unsafe_allow_html=True,
-        )
-
-        st.markdown("<div class='headline'>Ordered Event Timeline</div>", unsafe_allow_html=True)
-        if total_events == 0:
-            st.caption("Waiting for execution events...")
+        st.markdown("<div class='panel-title' style='margin-top:8px;'>Event Stream</div>", unsafe_allow_html=True)
+        recent = live_state["events"][-18:]
+        if not recent:
+            st.caption("Waiting for events...")
         else:
-            recent = live_state["events"][-24:]
             for event in recent:
                 ts = datetime.fromtimestamp(event["timestamp"]).strftime("%H:%M:%S")
-                label = STAGE_LABELS.get(event["stage"], event["stage"].title())
+                stage = STAGE_LABELS.get(event["stage"], event["stage"].title())
                 marker = {
-                    "running": "[RUN]",
-                    "completed": "[DONE]",
-                    "failed": "[FAIL]",
-                }.get(event["status"], "[INFO]")
+                    "running": "RUN",
+                    "completed": "DONE",
+                    "failed": "FAIL",
+                }.get(event["status"], "INFO")
                 st.markdown(
                     (
-                        "<div class='timeline-item'>"
-                        f"<div><strong>{marker} {label}</strong> - {event['message']}</div>"
-                        f"<div class='timeline-time'>{ts}</div>"
+                        "<div class='event'>"
+                        f"<div><strong>[{marker}] {stage}</strong> - {event['message']}</div>"
+                        f"<div class='event-time'>{ts}</div>"
                         "</div>"
                     ),
                     unsafe_allow_html=True,
                 )
 
 
+def save_uploaded_images(files) -> list[str]:
+    image_paths = []
+    for uploaded in files or []:
+        suffix = os.path.splitext(uploaded.name)[1] or ".png"
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            tmp.write(uploaded.read())
+            image_paths.append(tmp.name)
+    return image_paths
+
+
+def cleanup_paths(paths: list[str]) -> None:
+    for path in paths:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+
+init_session_state()
+
 with st.sidebar:
-    st.title("Research Console")
-    st.caption("Real-time Multi-Agent Orchestration")
+    st.title("Research Assistant")
+    st.caption("Production Workflow Console")
 
-    st.subheader("Agents")
-    st.markdown(
-        "\n".join(
-            [
-                "- Web Research Agent",
-                "- ArXiv Research Agent",
-                "- Multi-Modal Agent",
-                "- Validator + Report Builder",
-            ]
-        )
-    )
-
-    st.subheader("API")
+    st.subheader("Configuration")
     key_status = "Configured" if os.getenv("OPENAI_API_KEY") else "Missing"
     st.write(f"OPENAI_API_KEY: {key_status}")
-    st.caption("Set this in `.env` or your system environment. It is not editable in the UI.")
+    st.caption("Set in `.env` or system environment. Hidden from UI.")
 
-    st.subheader("Visual Inputs (Optional)")
+    st.subheader("Optional Inputs")
     image_urls_input = st.text_area(
         "Image URLs (one per line)",
         placeholder="https://example.com/chart.png",
-        height=90,
+        height=84,
     )
     uploaded_images = st.file_uploader(
-        "Upload images",
+        "Upload Images",
         accept_multiple_files=True,
         type=["jpg", "jpeg", "png", "webp", "gif"],
     )
@@ -706,143 +571,161 @@ with st.sidebar:
             st.session_state.orchestrator.cache.clear()
             st.success("Cache cleared")
 
-st.title("Research Multi-Agent Workflow")
-st.caption("Run a query and watch each stage execute in real time.")
+    if st.button("Clear Conversation", use_container_width=True):
+        st.session_state.chat_messages = [
+            {
+                "role": "assistant",
+                "content": "Conversation reset. Ask a new research question.",
+            }
+        ]
+        st.session_state.last_result = None
+        st.session_state.live_state = init_live_state()
 
-query = st.text_area(
-    "Research Query",
-    placeholder="What are the latest advances in quantum error correction?",
-    height=100,
-    label_visibility="collapsed",
+st.markdown(
+    (
+        "<div class='topbar'>"
+        "<div class='topbar-title'>Research Assistant Studio</div>"
+        "<div class='topbar-sub'>"
+        "Left pane: chat + report output. Right pane: real-time agent dashboard and event stream."
+        "</div>"
+        "</div>"
+    ),
+    unsafe_allow_html=True,
 )
 
-run_col, _ = st.columns([1, 5])
-with run_col:
-    run_button = st.button("Run Research", type="primary", use_container_width=True)
+left_col, right_col = st.columns([1.3, 1], gap="large")
 
-control_room = st.empty()
+with left_col:
+    st.markdown("<div class='panel'>", unsafe_allow_html=True)
+    st.markdown("<div class='panel-title'>Query Input</div>", unsafe_allow_html=True)
+    query = st.text_area(
+        "Research Query",
+        placeholder="Ask a research question...",
+        height=92,
+        label_visibility="collapsed",
+    )
+    run_button = st.button("Run Research", type="primary", use_container_width=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    chat_box = st.container()
+    st.markdown("<div class='panel'>", unsafe_allow_html=True)
+    render_chat(st.session_state.chat_messages, chat_box)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown("<div class='panel'>", unsafe_allow_html=True)
+    tabs = st.tabs(["Report Viewer", "Agent Outputs"]) 
+
+    with tabs[0]:
+        if st.session_state.last_result:
+            st.markdown(st.session_state.last_result["report"])
+            st.download_button(
+                "Download Report",
+                data=st.session_state.last_result["report"],
+                file_name=safe_report_filename(st.session_state.last_result["query"]),
+                mime="text/markdown",
+            )
+        else:
+            st.caption("Run research to see the generated report here.")
+
+    with tabs[1]:
+        if st.session_state.last_result:
+            for agent_result in st.session_state.last_result["agent_results"]:
+                with st.expander(agent_result.get("agent", "Agent"), expanded=False):
+                    st.markdown(agent_result.get("findings", "No findings"))
+                    papers = agent_result.get("papers") or []
+                    if papers:
+                        st.markdown("**Top papers**")
+                        for paper in papers:
+                            title = paper.get("title", "Untitled")
+                            url = paper.get("url", "")
+                            st.markdown(f"- [{title}]({url})")
+        else:
+            st.caption("Agent outputs will appear after execution.")
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+with right_col:
+    dashboard_placeholder = st.empty()
 
 if run_button:
     if not query.strip():
         st.warning("Please enter a research query.")
+        render_dashboard(st.session_state.live_state, dashboard_placeholder)
         st.stop()
 
     if not os.getenv("OPENAI_API_KEY"):
-        st.error("OPENAI_API_KEY is missing. Add it to `.env` (or system environment) and restart the app.")
+        st.error("OPENAI_API_KEY is missing. Add it to `.env` or system environment and restart.")
+        render_dashboard(st.session_state.live_state, dashboard_placeholder)
         st.stop()
 
-    image_urls = [u.strip() for u in image_urls_input.splitlines() if u.strip()]
-    image_paths = []
+    st.session_state.chat_messages.append({"role": "user", "content": query.strip()})
 
-    if uploaded_images:
-        for uploaded in uploaded_images:
-            suffix = os.path.splitext(uploaded.name)[1] or ".png"
-            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as f:
-                f.write(uploaded.read())
-                image_paths.append(f.name)
+    image_urls = [line.strip() for line in image_urls_input.splitlines() if line.strip()]
+    image_paths = save_uploaded_images(uploaded_images)
 
-    with st.spinner("Initializing orchestrator..."):
-        from src.orchestrator import ResearchOrchestrator
+    from src.orchestrator import ResearchOrchestrator
 
-        # Recreate each run so code edits are reflected immediately.
-        st.session_state.orchestrator = ResearchOrchestrator()
-
-    orchestrator = st.session_state.orchestrator
+    st.session_state.orchestrator = ResearchOrchestrator()
     live_state = init_live_state()
     live_state["run_start"] = time.time()
+    st.session_state.live_state = live_state
 
     def progress_callback(event_or_stage, message: str = ""):
-        payload = (
-            event_or_stage
-            if isinstance(event_or_stage, dict)
-            else {"stage": event_or_stage, "message": message}
-        )
-        add_event(live_state, payload)
-        render_control_room(live_state, control_room)
+        payload = event_or_stage if isinstance(event_or_stage, dict) else {"stage": event_or_stage, "message": message}
+        add_event(st.session_state.live_state, payload)
+        render_dashboard(st.session_state.live_state, dashboard_placeholder)
 
-    render_control_room(live_state, control_room)
+    render_dashboard(st.session_state.live_state, dashboard_placeholder)
 
     try:
-        result = orchestrator.run(
-            query=query,
+        result = st.session_state.orchestrator.run(
+            query=query.strip(),
             image_urls=image_urls,
             image_paths=image_paths,
             progress_callback=progress_callback,
         )
-    except Exception as e:
-        st.error(f"Research failed: {e}")
+    except Exception as exc:
+        cleanup_paths(image_paths)
+        st.session_state.chat_messages.append(
+            {
+                "role": "assistant",
+                "content": f"Run failed: {exc}",
+            }
+        )
+        st.error(f"Research failed: {exc}")
+        render_dashboard(st.session_state.live_state, dashboard_placeholder)
         st.stop()
 
-    render_control_room(live_state, control_room)
-
-    for path in image_paths:
-        try:
-            os.remove(path)
-        except OSError:
-            pass
+    cleanup_paths(image_paths)
 
     if "error" in result:
+        st.session_state.chat_messages.append(
+            {
+                "role": "assistant",
+                "content": result["error"],
+            }
+        )
         st.error(result["error"])
+        render_dashboard(st.session_state.live_state, dashboard_placeholder)
         st.stop()
 
-    elapsed = time.time() - live_state["run_start"]
-    st.success(f"Research complete in {elapsed:.1f}s using {result['agent_count']} agent(s).")
+    st.session_state.last_result = result
 
-    st.markdown("---")
-    st.header("Final Report")
-    st.markdown(result["report"])
-
-    st.markdown("---")
-    st.header("Agent Findings")
-    agent_tabs = st.tabs([r["agent"] for r in result["agent_results"]])
-    for tab, agent_result in zip(agent_tabs, result["agent_results"]):
-        with tab:
-            st.markdown(agent_result.get("findings", "No findings"))
-            if agent_result.get("papers"):
-                st.subheader("Top Papers")
-                for paper in agent_result["papers"]:
-                    title = paper.get("title", "Untitled")
-                    url = paper.get("url", "")
-                    authors = ", ".join(paper.get("authors", []))
-                    published = paper.get("published", "")
-                    st.markdown(f"- [{title}]({url}) - {authors} ({published})")
-
-    st.markdown("---")
-    st.header("Validation")
-    validation = result["validation"]
-    st.write(f"Confidence: **{validation.get('confidence', 'unknown').title()}**")
-
-    if validation.get("consistent_findings"):
-        st.subheader("Consensus")
-        for finding in validation["consistent_findings"]:
-            st.markdown(f"- {finding}")
-
-    if validation.get("has_contradictions") and validation.get("contradictions"):
-        st.subheader("Resolved Contradictions")
-        resolutions = result.get("resolutions", [])
-        for i, contradiction in enumerate(validation["contradictions"]):
-            with st.expander(f"Contradiction {i + 1}: {contradiction.get('topic', 'Unknown')}"):
-                st.markdown(f"- Claim A: {contradiction.get('claim_a', 'N/A')}")
-                st.markdown(f"- Claim B: {contradiction.get('claim_b', 'N/A')}")
-                if i < len(resolutions):
-                    st.markdown(f"- Resolution: {resolutions[i].get('resolution', 'N/A')}")
-
-    with st.expander("Research Plan"):
-        plan = result.get("plan", {})
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Web Agent", "Active" if plan.get("use_web") else "Skipped")
-        col2.metric("ArXiv Agent", "Active" if plan.get("use_arxiv") else "Skipped")
-        col3.metric("Multi-Modal", "Active" if plan.get("use_multimodal") else "Skipped")
-        st.caption(f"Rationale: {plan.get('rationale', 'N/A')}")
-
-    st.download_button(
-        "Download Report",
-        data=result["report"],
-        file_name=safe_report_filename(query),
-        mime="text/markdown",
+    summary_text = result["report"][:700]
+    if len(result["report"]) > 700:
+        summary_text += "..."
+    st.session_state.chat_messages.append(
+        {
+            "role": "assistant",
+            "content": (
+                f"Research complete with {result['agent_count']} agent(s).\n\n"
+                f"{summary_text}"
+            ),
+        }
     )
 
-else:
-    idle_state = init_live_state()
-    render_control_room(idle_state, control_room)
-    st.caption("Run a query to animate node states and route decisions in real time.")
+    render_dashboard(st.session_state.live_state, dashboard_placeholder)
+    st.rerun()
+
+render_dashboard(st.session_state.live_state, dashboard_placeholder)
+st.markdown("<div class='small-muted'>Tip: keep this dashboard pane open while submitting multiple queries to compare runs.</div>", unsafe_allow_html=True)
