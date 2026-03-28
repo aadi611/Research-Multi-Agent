@@ -51,7 +51,7 @@ Use clear markdown formatting."""
                 {"role": "system", "content": "You are an expert research synthesizer. Write clear, factual, well-structured reports."},
                 {"role": "user", "content": prompt},
             ],
-            max_tokens=4000,
+            max_completion_tokens=4000,
             stream=True,
         )
 
