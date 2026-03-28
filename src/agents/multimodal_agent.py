@@ -35,7 +35,7 @@ Provide:
         response = self.client.chat.completions.create(
             model=self.model,
             messages=[{"role": "user", "content": content}],
-            max_tokens=2000,
+            max_completion_tokens=2000,
         )
 
         return {
