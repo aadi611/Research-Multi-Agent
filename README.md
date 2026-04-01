@@ -52,7 +52,7 @@ You can read the generated report directly in the web UI and download it as mark
 
 | Variable | Required | Description |
 |---|---|---|
-| `OPENAI_API_KEY` | Yes | Your OpenAI API key |
+| `OPENAI_API_KEY` | Yes | Add your OpenAI API key |
 | `REDIS_URL` | No | Redis connection URL (default: in-memory cache) |
 | `CHROMA_DB_PATH` | No | ChromaDB storage path (default: `./chroma_db`) |
 
