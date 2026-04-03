@@ -39,6 +39,13 @@ STAGE_ORDER = [
     "report",
 ]
 
+PROMPT_TEMPLATES = [
+    "Summarize the latest breakthroughs in fusion energy and list major technical bottlenecks.",
+    "Compare open-source LLMs for on-device use in 2026 with tradeoffs on latency, quality, and memory.",
+    "Tell me about the Strait of Hormuz and why it matters for global energy markets.",
+    "What are the safest and most effective ways to improve sleep quality backed by recent studies?",
+]
+
 STATUS_META = {
     "idle": {"label": "Idle", "color": "#6b7280", "bg": "#f3f4f6"},
     "running": {"label": "Running", "color": "#1d4ed8", "bg": "#e0edff"},
@@ -318,6 +325,10 @@ def init_session_state() -> None:
         st.session_state.last_result = None
     if "live_state" not in st.session_state:
         st.session_state.live_state = init_live_state()
+    if "run_history" not in st.session_state:
+        st.session_state.run_history = []
+    if "query_input" not in st.session_state:
+        st.session_state.query_input = ""
 
 
 def normalize_event(payload) -> dict:
@@ -382,6 +393,25 @@ def safe_report_filename(query: str) -> str:
     return f"research_{normalized[:40]}.md"
 
 
+def record_run(query: str, live_state: dict, result: dict | None = None, error: str | None = None) -> None:
+    duration = 0.0
+    if live_state.get("run_start"):
+        duration = round(time.time() - live_state["run_start"], 2)
+
+    entry = {
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "query": query.strip(),
+        "status": "failed" if error else "completed",
+        "duration_s": duration,
+        "agent_count": (result or {}).get("agent_count", 0),
+        "error": error,
+        "result": result,
+    }
+
+    st.session_state.run_history.insert(0, entry)
+    st.session_state.run_history = st.session_state.run_history[:20]
+
+
 def render_chat(messages: list[dict], container) -> None:
     with container.container():
         st.markdown("<div class='panel-title'>Conversation</div>", unsafe_allow_html=True)
@@ -402,7 +432,7 @@ def render_chat(messages: list[dict], container) -> None:
         st.markdown("</div>", unsafe_allow_html=True)
 
 
-def render_dashboard(live_state: dict, container) -> None:
+def render_dashboard(live_state: dict, container, run_history: list[dict] | None = None) -> None:
     with container.container():
         completed_count = sum(1 for stage in STAGE_ORDER if stage_status(live_state, stage) == "completed")
         failed_count = sum(1 for stage in STAGE_ORDER if stage_status(live_state, stage) == "failed")
@@ -413,6 +443,7 @@ def render_dashboard(live_state: dict, container) -> None:
 
         active = live_state.get("active_stage")
         active_label = STAGE_LABELS.get(active, "Idle")
+        run_count = len(run_history or [])
 
         st.markdown("<div class='panel-title'>Agent Operations Dashboard</div>", unsafe_allow_html=True)
 
@@ -423,6 +454,7 @@ def render_dashboard(live_state: dict, container) -> None:
                 f"<div class='kpi'><div class='kpi-l'>Progress</div><div class='kpi-v'>{progress}%</div></div>"
                 f"<div class='kpi'><div class='kpi-l'>Active Stage</div><div class='kpi-v'>{active_label}</div></div>"
                 f"<div class='kpi'><div class='kpi-l'>Failures</div><div class='kpi-v'>{failed_count}</div></div>"
+                f"<div class='kpi'><div class='kpi-l'>Total Runs</div><div class='kpi-v'>{run_count}</div></div>"
                 "</div>"
             ),
             unsafe_allow_html=True,
@@ -566,6 +598,43 @@ with st.sidebar:
         type=["jpg", "jpeg", "png", "webp", "gif"],
     )
 
+    st.subheader("Quick Prompts")
+    selected_prompt = st.selectbox(
+        "Choose a starter prompt",
+        options=["Custom"] + PROMPT_TEMPLATES,
+        index=0,
+        key="selected_prompt",
+    )
+    if st.button("Use Selected Prompt", use_container_width=True):
+        if selected_prompt != "Custom":
+            st.session_state.query_input = selected_prompt
+
+    st.subheader("Run History")
+    if st.session_state.run_history:
+        history_labels = [
+            f"{item['timestamp']} | {item['status'].upper()} | {item['query'][:44]}"
+            for item in st.session_state.run_history
+        ]
+        selected_idx = st.selectbox(
+            "Recent runs",
+            options=list(range(len(history_labels))),
+            format_func=lambda i: history_labels[i],
+            key="history_idx",
+        )
+        picked = st.session_state.run_history[selected_idx]
+        st.caption(f"Duration: {picked['duration_s']}s | Agents: {picked['agent_count']}")
+        if picked.get("error"):
+            st.caption(f"Error: {picked['error'][:120]}")
+        if st.button("Load Selected Report", use_container_width=True):
+            if picked.get("result"):
+                st.session_state.last_result = picked["result"]
+                st.session_state.chat_messages.append(
+                    {"role": "assistant", "content": f"Loaded report from run at {picked['timestamp']}."}
+                )
+                st.rerun()
+    else:
+        st.caption("No runs yet.")
+
     if st.button("Clear Cache", use_container_width=True):
         if "orchestrator" in st.session_state:
             st.session_state.orchestrator.cache.clear()
@@ -603,6 +672,7 @@ with left_col:
         placeholder="Ask a research question...",
         height=92,
         label_visibility="collapsed",
+        key="query_input",
     )
     run_button = st.button("Run Research", type="primary", use_container_width=True)
     st.markdown("</div>", unsafe_allow_html=True)
@@ -650,12 +720,12 @@ with right_col:
 if run_button:
     if not query.strip():
         st.warning("Please enter a research query.")
-        render_dashboard(st.session_state.live_state, dashboard_placeholder)
+        render_dashboard(st.session_state.live_state, dashboard_placeholder, st.session_state.run_history)
         st.stop()
 
     if not os.getenv("OPENAI_API_KEY"):
         st.error("OPENAI_API_KEY is missing. Add it to `.env` or system environment and restart.")
-        render_dashboard(st.session_state.live_state, dashboard_placeholder)
+        render_dashboard(st.session_state.live_state, dashboard_placeholder, st.session_state.run_history)
         st.stop()
 
     st.session_state.chat_messages.append({"role": "user", "content": query.strip()})
@@ -673,9 +743,9 @@ if run_button:
     def progress_callback(event_or_stage, message: str = ""):
         payload = event_or_stage if isinstance(event_or_stage, dict) else {"stage": event_or_stage, "message": message}
         add_event(st.session_state.live_state, payload)
-        render_dashboard(st.session_state.live_state, dashboard_placeholder)
+        render_dashboard(st.session_state.live_state, dashboard_placeholder, st.session_state.run_history)
 
-    render_dashboard(st.session_state.live_state, dashboard_placeholder)
+    render_dashboard(st.session_state.live_state, dashboard_placeholder, st.session_state.run_history)
 
     try:
         result = st.session_state.orchestrator.run(
@@ -686,6 +756,7 @@ if run_button:
         )
     except Exception as exc:
         cleanup_paths(image_paths)
+        record_run(query=query, live_state=st.session_state.live_state, result=None, error=str(exc))
         st.session_state.chat_messages.append(
             {
                 "role": "assistant",
@@ -693,12 +764,13 @@ if run_button:
             }
         )
         st.error(f"Research failed: {exc}")
-        render_dashboard(st.session_state.live_state, dashboard_placeholder)
+        render_dashboard(st.session_state.live_state, dashboard_placeholder, st.session_state.run_history)
         st.stop()
 
     cleanup_paths(image_paths)
 
     if "error" in result:
+        record_run(query=query, live_state=st.session_state.live_state, result=None, error=result["error"])
         st.session_state.chat_messages.append(
             {
                 "role": "assistant",
@@ -706,10 +778,11 @@ if run_button:
             }
         )
         st.error(result["error"])
-        render_dashboard(st.session_state.live_state, dashboard_placeholder)
+        render_dashboard(st.session_state.live_state, dashboard_placeholder, st.session_state.run_history)
         st.stop()
 
     st.session_state.last_result = result
+    record_run(query=query, live_state=st.session_state.live_state, result=result)
 
     summary_text = result["report"][:700]
     if len(result["report"]) > 700:
@@ -724,8 +797,8 @@ if run_button:
         }
     )
 
-    render_dashboard(st.session_state.live_state, dashboard_placeholder)
+    render_dashboard(st.session_state.live_state, dashboard_placeholder, st.session_state.run_history)
     st.rerun()
 
-render_dashboard(st.session_state.live_state, dashboard_placeholder)
+render_dashboard(st.session_state.live_state, dashboard_placeholder, st.session_state.run_history)
 st.markdown("<div class='small-muted'>Tip: keep this dashboard pane open while submitting multiple queries to compare runs.</div>", unsafe_allow_html=True)
