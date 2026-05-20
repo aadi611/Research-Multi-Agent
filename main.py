@@ -9,6 +9,7 @@ import streamlit as st
 from dotenv import load_dotenv
 
 load_dotenv()
+print(loaded)
 
 st.set_page_config(
     page_title="Research Assistant Studio",
