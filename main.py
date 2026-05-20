@@ -323,6 +323,7 @@ def init_session_state() -> None:
             }
         ]
     if "last_result" not in st.session_state:
+        print(last_result)
         st.session_state.last_result = None
     if "live_state" not in st.session_state:
         st.session_state.live_state = init_live_state()
