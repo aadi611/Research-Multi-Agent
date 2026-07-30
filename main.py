@@ -29,7 +29,6 @@ STAGE_LABELS = {
     "report": "Report Builder",
 }
 
-
 STAGE_ORDER = [
     "cache",
     "memory",
