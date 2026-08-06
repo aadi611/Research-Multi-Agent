@@ -26,6 +26,7 @@ STAGE_LABELS = {
     "multimodal": "Vision Agent",
     "validate": "Validator",
     "report": "Report Builder",
+    "analyze": "Analysis Builder",
 }
 
 STAGE_ORDER = [
