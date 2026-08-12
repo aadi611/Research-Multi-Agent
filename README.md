@@ -2,7 +2,8 @@
 
 An AI-powered research system built on OpenAI models with specialized agents, memory layers, contradiction detection, and a real-time workflow UI.
 
-## Architecture
+## Architecture for the app
+
 ```
 Task Query → Streamlit UI → Orchestrator
                                 ├── Memory Cache (Redis + ChromaDB)
