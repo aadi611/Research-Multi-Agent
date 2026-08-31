@@ -7,8 +7,6 @@ from dotenv import load_dotenv
 
 
 load_dotenv()
-print(loaded)
-print(load)
 
 st.set_page_config(
     page_title="Research Assistant Studio",
