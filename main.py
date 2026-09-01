@@ -2,15 +2,17 @@
 import os
 import re
 import tempfile
+import time
+from datetime import datetime
+
 import streamlit as st
 from dotenv import load_dotenv
-
 
 load_dotenv()
 
 st.set_page_config(
     page_title="Research Assistant Studio",
-    page_icon="RS",
+    page_icon="🔬",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -26,7 +28,6 @@ STAGE_LABELS = {
     "report": "Report Builder",
     "analyze": "Analysis Builder",
 }
-
 STAGE_ORDER = [
     "cache",
     "memory",
@@ -37,20 +38,19 @@ STAGE_ORDER = [
     "validate",
     "report",
 ]
-
 PROMPT_TEMPLATES = [
     "Summarize the latest breakthroughs in fusion energy and list major technical bottlenecks.",
     "Compare open-source LLMs for on-device use in 2026 with tradeoffs on latency, quality, and memory.",
     "Tell me about the Strait of Hormuz and why it matters for global energy markets.",
     "What are the safest and most effective ways to improve sleep quality backed by recent studies?",
 ]
-
 STATUS_META = {
     "idle": {"label": "Idle", "color": "#6b7280", "bg": "#f3f4f6"},
     "running": {"label": "Running", "color": "#1d4ed8", "bg": "#e0edff"},
     "completed": {"label": "Completed", "color": "#166534", "bg": "#dcfce7"},
     "failed": {"label": "Failed", "color": "#991b1b", "bg": "#fee2e2"},
 }
+URL_RE = re.compile(r"^https?://\S+$", re.IGNORECASE)
 
 st.markdown(
     """
@@ -67,18 +67,15 @@ st.markdown(
   --warn: #ea580c;
   --bad: #dc2626;
 }
-
 html, body, [class*="css"] {
   font-family: "Segoe UI", "Trebuchet MS", sans-serif;
 }
-
 .stApp {
   background:
     radial-gradient(900px 500px at -5% -20%, #dbeafe 0%, transparent 68%),
     radial-gradient(800px 500px at 110% -10%, #ccfbf1 0%, transparent 56%),
     linear-gradient(180deg, #f7fbff 0%, #f2f6fc 100%);
 }
-
 .topbar {
   border: 1px solid var(--edge);
   background: linear-gradient(120deg, #ffffff 0%, #f8fbff 100%);
@@ -86,19 +83,16 @@ html, body, [class*="css"] {
   padding: 14px 16px;
   margin-bottom: 10px;
 }
-
 .topbar-title {
   color: var(--ink);
   font-weight: 900;
   font-size: 1.25rem;
   letter-spacing: 0.2px;
 }
-
 .topbar-sub {
   color: var(--muted);
   font-size: 0.9rem;
 }
-
 .panel {
   border: 1px solid var(--edge);
   background: var(--panel);
@@ -107,71 +101,33 @@ html, body, [class*="css"] {
   margin-bottom: 12px;
   box-shadow: 0 4px 14px rgba(15, 34, 59, 0.05);
 }
-
 .panel-title {
   color: var(--ink);
   font-weight: 800;
   margin-bottom: 8px;
 }
-
-.chat-wrap {
-  max-height: 360px;
-  overflow-y: auto;
-  padding-right: 4px;
-}
-
-.msg {
-  border-radius: 12px;
-  padding: 10px 12px;
-  margin: 8px 0;
-  line-height: 1.45;
-  border: 1px solid var(--edge);
-}
-
-.msg.user {
-  background: #eef6ff;
-  border-color: #bfdbfe;
-}
-
-.msg.assistant {
-  background: #f8fafc;
-}
-
-.msg-role {
-  font-size: 0.75rem;
-  font-weight: 800;
-  color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.4px;
-  margin-bottom: 5px;
-}
-
 .kpi-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
   gap: 8px;
   margin-bottom: 10px;
 }
-
 .kpi {
   border: 1px solid var(--edge);
   border-radius: 10px;
   background: #f9fbff;
   padding: 8px 10px;
 }
-
 .kpi-l {
   color: var(--muted);
   font-size: 0.74rem;
   font-weight: 700;
 }
-
 .kpi-v {
   color: var(--ink);
   font-size: 1.15rem;
   font-weight: 900;
 }
-
 .flow-track {
   width: 100%;
   height: 10px;
@@ -181,7 +137,6 @@ html, body, [class*="css"] {
   overflow: hidden;
   margin: 6px 0 10px;
 }
-
 .flow-fill {
   height: 100%;
   width: 0%;
@@ -191,26 +146,22 @@ html, body, [class*="css"] {
   animation: flowShift 1.6s linear infinite;
   transition: width 0.35s ease;
 }
-
 .stage-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
-
 .stage-card {
   border: 1px solid var(--edge);
   border-radius: 10px;
   background: #fff;
   padding: 8px;
 }
-
 .stage-name {
   color: var(--ink);
   font-size: 0.82rem;
   font-weight: 800;
 }
-
 .pill {
   display: inline-block;
   border-radius: 999px;
@@ -219,13 +170,11 @@ html, body, [class*="css"] {
   font-weight: 800;
   margin-top: 4px;
 }
-
 .stage-meta {
   color: var(--muted);
   font-size: 0.74rem;
   margin-top: 4px;
 }
-
 .canvas {
   position: relative;
   min-height: 230px;
@@ -235,7 +184,6 @@ html, body, [class*="css"] {
   overflow: hidden;
   margin-top: 10px;
 }
-
 .node {
   position: absolute;
   border: 2px solid #cdd9ed;
@@ -245,36 +193,30 @@ html, body, [class*="css"] {
   box-shadow: 0 3px 10px rgba(15, 34, 59, 0.05);
   color: var(--ink);
 }
-
 .node .t {
   font-size: 0.82rem;
   font-weight: 900;
 }
-
 .node .s {
   font-size: 0.73rem;
   color: var(--muted);
   margin-top: 3px;
 }
-
 .node.idle { border-color: #cbd5e1; background: #f8fafc; }
 .node.running { border-color: #2563eb; background: #eff6ff; }
 .node.completed { border-color: #16a34a; background: #f0fdf4; }
 .node.failed { border-color: #dc2626; background: #fef2f2; }
-
 .edge {
   position: absolute;
   height: 3px;
   border-radius: 999px;
   background: #8ea3c7;
 }
-
 .edge.live {
   background: linear-gradient(90deg, #60a5fa, #2563eb, #22d3ee);
   background-size: 170% 100%;
   animation: flowShift 1.2s linear infinite;
 }
-
 .event {
   border-left: 3px solid #1d4ed8;
   border-radius: 6px;
@@ -282,17 +224,14 @@ html, body, [class*="css"] {
   padding: 6px 8px;
   margin: 7px 0;
 }
-
 .event-time {
   color: var(--muted);
   font-size: 0.72rem;
 }
-
 .small-muted {
   color: var(--muted);
   font-size: 0.8rem;
 }
-
 @keyframes flowShift {
   0% { background-position: 0% 50%; }
   100% { background-position: 180% 50%; }
@@ -303,6 +242,9 @@ html, body, [class*="css"] {
 )
 
 
+# --------------------------------------------------------------------------
+# State helpers
+# --------------------------------------------------------------------------
 def init_live_state() -> dict:
     return {
         "events": [],
@@ -321,7 +263,6 @@ def init_session_state() -> None:
             }
         ]
     if "last_result" not in st.session_state:
-        print(last_result)
         st.session_state.last_result = None
     if "live_state" not in st.session_state:
         st.session_state.live_state = init_live_state()
@@ -329,6 +270,23 @@ def init_session_state() -> None:
         st.session_state.run_history = []
     if "query_input" not in st.session_state:
         st.session_state.query_input = ""
+    if "orchestrator" not in st.session_state:
+        st.session_state.orchestrator = None
+
+
+def get_orchestrator():
+    """Lazily create and cache the orchestrator in session state.
+
+    Recreating the orchestrator on every run would defeat the point of the
+    "Cache" / "Memory" pipeline stages, so it is built once per session and
+    reused across queries. "Clear Cache" empties its internal cache without
+    throwing the whole object away.
+    """
+    if st.session_state.get("orchestrator") is None:
+        from src.orchestrator import ResearchOrchestrator
+
+        st.session_state.orchestrator = ResearchOrchestrator()
+    return st.session_state.orchestrator
 
 
 def normalize_event(payload) -> dict:
@@ -340,7 +298,6 @@ def normalize_event(payload) -> dict:
             "timestamp": float(payload.get("timestamp", time.time())),
             "duration_s": payload.get("duration_s"),
         }
-
     stage, message = payload
     return {
         "stage": stage,
@@ -354,14 +311,12 @@ def normalize_event(payload) -> dict:
 def add_event(live_state: dict, payload) -> None:
     event = normalize_event(payload)
     live_state["events"].append(event)
-
     stage = event["stage"]
     if stage in live_state["stages"]:
         if event["status"] in {"running", "completed", "failed"}:
             live_state["stages"][stage]["status"] = event["status"]
         if isinstance(event["duration_s"], (int, float)):
             live_state["stages"][stage]["duration_s"] = float(event["duration_s"])
-
     if event["status"] == "running":
         live_state["active_stage"] = stage
     if event["status"] in {"completed", "failed"} and live_state.get("active_stage") == stage:
@@ -393,11 +348,24 @@ def safe_report_filename(query: str) -> str:
     return f"research_{normalized[:40]}.md"
 
 
+def parse_image_urls(raw_text: str) -> tuple[list[str], list[str]]:
+    """Split textarea input into (valid_urls, rejected_lines)."""
+    valid, rejected = [], []
+    for line in raw_text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if URL_RE.match(line):
+            valid.append(line)
+        else:
+            rejected.append(line)
+    return valid, rejected
+
+
 def record_run(query: str, live_state: dict, result: dict | None = None, error: str | None = None) -> None:
     duration = 0.0
     if live_state.get("run_start"):
         duration = round(time.time() - live_state["run_start"], 2)
-
     entry = {
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "query": query.strip(),
@@ -407,29 +375,22 @@ def record_run(query: str, live_state: dict, result: dict | None = None, error: 
         "error": error,
         "result": result,
     }
-
     st.session_state.run_history.insert(0, entry)
     st.session_state.run_history = st.session_state.run_history[:20]
 
 
+# --------------------------------------------------------------------------
+# Rendering
+# --------------------------------------------------------------------------
 def render_chat(messages: list[dict], container) -> None:
     with container.container():
         st.markdown("<div class='panel-title'>Conversation</div>", unsafe_allow_html=True)
-        st.markdown("<div class='chat-wrap'>", unsafe_allow_html=True)
-        for item in messages[-14:]:
-            role = item.get("role", "assistant")
-            content = item.get("content", "")
-            role_text = "You" if role == "user" else "Assistant"
-            st.markdown(
-                (
-                    f"<div class='msg {role}'>"
-                    f"<div class='msg-role'>{role_text}</div>"
-                    f"<div>{content}</div>"
-                    "</div>"
-                ),
-                unsafe_allow_html=True,
-            )
-        st.markdown("</div>", unsafe_allow_html=True)
+        with st.container(height=360):
+            for item in messages[-14:]:
+                role = item.get("role", "assistant")
+                avatar = "🧑" if role == "user" else "🤖"
+                with st.chat_message(role, avatar=avatar):
+                    st.markdown(item.get("content", ""))
 
 
 def render_dashboard(live_state: dict, container, run_history: list[dict] | None = None) -> None:
@@ -440,13 +401,10 @@ def render_dashboard(live_state: dict, container, run_history: list[dict] | None
         run_time = 0.0
         if live_state.get("run_start"):
             run_time = time.time() - live_state["run_start"]
-
         active = live_state.get("active_stage")
         active_label = STAGE_LABELS.get(active, "Idle")
         run_count = len(run_history or [])
-
         st.markdown("<div class='panel-title'>Agent Operations Dashboard</div>", unsafe_allow_html=True)
-
         st.markdown(
             (
                 "<div class='kpi-grid'>"
@@ -459,7 +417,6 @@ def render_dashboard(live_state: dict, container, run_history: list[dict] | None
             ),
             unsafe_allow_html=True,
         )
-
         st.markdown(
             (
                 "<div class='flow-track'>"
@@ -468,7 +425,6 @@ def render_dashboard(live_state: dict, container, run_history: list[dict] | None
             ),
             unsafe_allow_html=True,
         )
-
         stage_cards = []
         for stage in STAGE_ORDER:
             current = stage_status(live_state, stage)
@@ -484,9 +440,7 @@ def render_dashboard(live_state: dict, container, run_history: list[dict] | None
                     "</div>"
                 )
             )
-
         st.markdown(f"<div class='stage-grid'>{''.join(stage_cards)}</div>", unsafe_allow_html=True)
-
         agent_state = combine_status(
             [
                 stage_status(live_state, "cache"),
@@ -500,12 +454,10 @@ def render_dashboard(live_state: dict, container, run_history: list[dict] | None
         router_state = stage_status(live_state, "validate")
         report_state = stage_status(live_state, "report")
         fallback_state = "failed" if failed_count else ("completed" if report_state == "completed" else "idle")
-
         edge_1 = "live" if agent_state == "running" else ""
         edge_2 = "live" if agent_state == "running" or router_state == "running" else ""
         edge_3 = "live" if report_state == "running" else ""
         edge_4 = "live" if fallback_state == "failed" else ""
-
         st.markdown(
             (
                 "<div class='canvas'>"
@@ -532,9 +484,8 @@ def render_dashboard(live_state: dict, container, run_history: list[dict] | None
             ),
             unsafe_allow_html=True,
         )
-
         st.markdown("<div class='panel-title' style='margin-top:8px;'>Event Stream</div>", unsafe_allow_html=True)
-        recent = live_state["events"][-18:]
+        recent = list(reversed(live_state["events"][-18:]))
         if not recent:
             st.caption("Waiting for events...")
         else:
@@ -559,11 +510,15 @@ def render_dashboard(live_state: dict, container, run_history: list[dict] | None
 
 def save_uploaded_images(files) -> list[str]:
     image_paths = []
-    for uploaded in files or []:
-        suffix = os.path.splitext(uploaded.name)[1] or ".png"
-        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-            tmp.write(uploaded.read())
-            image_paths.append(tmp.name)
+    try:
+        for uploaded in files or []:
+            suffix = os.path.splitext(uploaded.name)[1] or ".png"
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                tmp.write(uploaded.read())
+                image_paths.append(tmp.name)
+    except Exception:
+        cleanup_paths(image_paths)
+        raise
     return image_paths
 
 
@@ -575,6 +530,9 @@ def cleanup_paths(paths: list[str]) -> None:
             pass
 
 
+# --------------------------------------------------------------------------
+# App
+# --------------------------------------------------------------------------
 init_session_state()
 
 with st.sidebar:
@@ -608,6 +566,7 @@ with st.sidebar:
     if st.button("Use Selected Prompt", use_container_width=True):
         if selected_prompt != "Custom":
             st.session_state.query_input = selected_prompt
+            st.rerun()
 
     st.subheader("Run History")
     if st.session_state.run_history:
@@ -632,13 +591,17 @@ with st.sidebar:
                     {"role": "assistant", "content": f"Loaded report from run at {picked['timestamp']}."}
                 )
                 st.rerun()
+            else:
+                st.info("This run has no saved report (it failed before producing one).")
     else:
         st.caption("No runs yet.")
 
     if st.button("Clear Cache", use_container_width=True):
-        if "orchestrator" in st.session_state:
+        if st.session_state.get("orchestrator") is not None:
             st.session_state.orchestrator.cache.clear()
             st.success("Cache cleared")
+        else:
+            st.info("No orchestrator has run yet — nothing to clear.")
 
     if st.button("Clear Conversation", use_container_width=True):
         st.session_state.chat_messages = [
@@ -649,6 +612,7 @@ with st.sidebar:
         ]
         st.session_state.last_result = None
         st.session_state.live_state = init_live_state()
+        st.rerun()
 
 st.markdown(
     (
@@ -683,8 +647,7 @@ with left_col:
     st.markdown("</div>", unsafe_allow_html=True)
 
     st.markdown("<div class='panel'>", unsafe_allow_html=True)
-    tabs = st.tabs(["Report Viewer", "Agent Outputs"]) 
-
+    tabs = st.tabs(["Report Viewer", "Agent Outputs"])
     with tabs[0]:
         if st.session_state.last_result:
             st.markdown(st.session_state.last_result["report"])
@@ -696,7 +659,6 @@ with left_col:
             )
         else:
             st.caption("Run research to see the generated report here.")
-
     with tabs[1]:
         if st.session_state.last_result:
             for agent_result in st.session_state.last_result["agent_results"]:
@@ -711,7 +673,6 @@ with left_col:
                             st.markdown(f"- [{title}]({url})")
         else:
             st.caption("Agent outputs will appear after execution.")
-
     st.markdown("</div>", unsafe_allow_html=True)
 
 with right_col:
@@ -722,20 +683,35 @@ if run_button:
         st.warning("Please enter a research query.")
         render_dashboard(st.session_state.live_state, dashboard_placeholder, st.session_state.run_history)
         st.stop()
-
     if not os.getenv("OPENAI_API_KEY"):
         st.error("OPENAI_API_KEY is missing. Add it to `.env` or system environment and restart.")
         render_dashboard(st.session_state.live_state, dashboard_placeholder, st.session_state.run_history)
         st.stop()
 
+    image_urls, rejected_urls = parse_image_urls(image_urls_input)
+    if rejected_urls:
+        st.warning(
+            "Ignored input(s) that don't look like URLs: " + ", ".join(rejected_urls[:5])
+        )
+
     st.session_state.chat_messages.append({"role": "user", "content": query.strip()})
 
-    image_urls = [line.strip() for line in image_urls_input.splitlines() if line.strip()]
-    image_paths = save_uploaded_images(uploaded_images)
+    image_paths = []
+    try:
+        image_paths = save_uploaded_images(uploaded_images)
+    except Exception as exc:
+        st.error(f"Could not read uploaded image(s): {exc}")
+        render_dashboard(st.session_state.live_state, dashboard_placeholder, st.session_state.run_history)
+        st.stop()
 
-    from src.orchestrator import ResearchOrchestrator
+    try:
+        orchestrator = get_orchestrator()
+    except Exception as exc:
+        cleanup_paths(image_paths)
+        st.error(f"Could not initialize the research orchestrator: {exc}")
+        render_dashboard(st.session_state.live_state, dashboard_placeholder, st.session_state.run_history)
+        st.stop()
 
-    st.session_state.orchestrator = ResearchOrchestrator()
     live_state = init_live_state()
     live_state["run_start"] = time.time()
     st.session_state.live_state = live_state
@@ -748,7 +724,7 @@ if run_button:
     render_dashboard(st.session_state.live_state, dashboard_placeholder, st.session_state.run_history)
 
     try:
-        result = st.session_state.orchestrator.run(
+        result = orchestrator.run(
             query=query.strip(),
             image_urls=image_urls,
             image_paths=image_paths,
@@ -796,9 +772,11 @@ if run_button:
             ),
         }
     )
-
     render_dashboard(st.session_state.live_state, dashboard_placeholder, st.session_state.run_history)
     st.rerun()
 
 render_dashboard(st.session_state.live_state, dashboard_placeholder, st.session_state.run_history)
-st.markdown("<div class='small-muted'>Tip: keep this dashboard pane open while submitting multiple queries to compare runs.</div>", unsafe_allow_html=True)
+st.markdown(
+    "<div class='small-muted'>Tip: keep this dashboard pane open while submitting multiple queries to compare runs.</div>",
+    unsafe_allow_html=True,
+)
