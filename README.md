@@ -12,6 +12,7 @@ Task Query → Streamlit UI → Orchestrator
                                 ├── Multi-Modal Agent      → OpenAI vision
                                 ├── Research Validator     → contradiction detection
                                 └── Report Generator       → final synthesis
+need to add a langchain deepagent for subajentic system!
 ```
 
 ## Production UI
