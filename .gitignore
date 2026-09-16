@@ -42,4 +42,4 @@ chroma_db/
 
 #misc
 .gitignore
-./dockerignore
+.dockerignore/
