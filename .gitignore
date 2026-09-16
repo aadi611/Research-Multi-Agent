@@ -39,3 +39,7 @@ Thumbs.db
 
 # Local vector database and generated data
 chroma_db/
+
+#misc
+.gitignore
+./dockerignore
