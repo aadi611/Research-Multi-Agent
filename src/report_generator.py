@@ -1,6 +1,6 @@
 """Generates the final comprehensive research report using OpenAI streaming."""
 from openai import OpenAI
-
+import time
 
 class ReportGenerator:
     def __init__(self, client: OpenAI, model: str = "gpt-5.4"):
