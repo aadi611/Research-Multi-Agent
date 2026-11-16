@@ -357,6 +357,7 @@ def parse_image_urls(raw_text: str) -> tuple[list[str], list[str]]:
             valid.append(line)
         else:
             rejected.append(line)
+            print(rejected)
     return valid, rejected
 
 
