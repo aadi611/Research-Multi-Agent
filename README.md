@@ -1,4 +1,4 @@
-# Multi-Agent Research Assistant
+# Multi-Agent Research Assistants
 
 An AI-powered research system built on OpenAI models with specialized agents, memory layers, contradiction detection, and a real-time workflow UI.
 
